@@ -1,0 +1,442 @@
+---
+title: "Análise da base IMDb"
+subtitle: "Avaliação de potencialidades de investimento"
+#author: "Ana Rafaela Torres"
+output:
+  html_document:
+    theme:
+      version: 4
+      bootswatch: cerulean
+  #prettydoc::html_pretty:
+  #  theme: cayman
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(tvthemes)
+library(extrafont)
+library(bslib)
+library(patchwork)
+loadfonts(quiet = TRUE)
+```
+
+
+
+## 1. Introdução
+### 1.1. Problematização
+Na busca por uma oportunidade de investimento na área cinematográfica, o objetivo deste trabalho é identificar qual categoria de filme tem potencial para ser tanto um sucesso financeiro  quanto um sucesso de crítica. Mas podendo desprezar um dos critérios caso o outro seja muito atraente.
+
+### 1.2. Sobre a fonte dos dados
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+imdb <- read_csv("movie_metadata.csv")
+
+
+qtde_filmes<-imdb %>% select(movie_title) %>% n_distinct() %>% format(decimal.mark = ",", big.mark = ".", big.interval = 3L)
+qtde_linhas<-imdb %>% nrow() %>% format(decimal.mark = ",", big.mark = ".", big.interval = 3L)
+qtde_colunas<-imdb %>% ncol()
+qtde_paises<-imdb %>% distinct(country) %>% nrow()
+qtde_diretores <- imdb %>% distinct(director_name) %>% nrow() %>% format(decimal.mark = ",", big.mark = ".", big.interval = 3L)
+periodo <- max(imdb$title_year, na.rm = TRUE) - min(imdb$title_year, na.rm = TRUE)
+
+
+#nome_colunas<-c("cor", "diretor", "num_avaliacoes", "duracao", "num_likes_facebook_diretor", #"num_likes_facebook_ator_3", "ator_2", "num_likes_facebook_ator_1", "receita", "generos", #"ator_1", "titulo", "num_votos", "total_likes_elenco", "ator_3", "num_atores_poster", "")
+```
+
+Conjunto de dados extraído do site Kaggle. Nele há `r qtde_colunas` variáveis e `r qtde_linhas` linhas abrangendo `r qtde_filmes` filmes em `r periodo` anos de produção cinematográfica em `r qtde_paises` países.
+
+Acesso aos dados por meio do site https://www.kaggle.com/carolzhangdc/imdb-5000-movie-dataset.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+biblioteca <- readr::read_delim("biblioteca.csv", ";", escape_double = FALSE, trim_ws = TRUE)
+biblioteca %>% DT::datatable()
+
+```
+
+## 2. Tratando a Base de Dados
+### 2.1. Removendo casos sem valor de orçamento ou receita
+```{r message=FALSE, warning=FALSE, include=FALSE}
+casos_na<-format(imdb %>% filter(is.na(gross) | is.na(budget)) %>% nrow(), decimal.mark = ",", big.mark = ".", big.interval = 3L)
+imdb<-imdb %>% filter(!is.na(gross) & !is.na(budget))
+qtde_linhas_na<-format(imdb %>% nrow(), decimal.mark = ",",big.mark = ".", big.interval = 3L)
+
+```
+São `r casos_na` linhas cujos campos orçamento ou receita não possuem valores.
+Após eliminar os casos supracitados, a base passará a ter `r qtde_linhas_na` linhas. 
+
+
+### 2.2. Removendo filmes duplicados
+```{r message=FALSE, warning=FALSE, include=FALSE}
+qtde_duplicados<-sum(duplicated(imdb$movie_title))
+imdb<- imdb %>% filter(!duplicated(imdb$movie_title))
+qtde_linhas_dupl<-format(imdb %>% nrow(), decimal.mark = ",", big.mark = ".", big.interval = 3L)
+duplicados<-imdb %>% filter(duplicated(imdb$movie_title))
+```
+São `r qtde_duplicados` títulos de filmes duplicados na base.
+Após eliminar os casos supracitados, a base passará a ter `r qtde_linhas_dupl` linhas. 
+
+
+### 2.3. Adicionando colunas
+```{r message=FALSE, warning=FALSE, include=FALSE}
+imdb <- imdb %>% mutate(
+  lucro = gross - budget,
+  margem = round(lucro / gross, 4),
+  roi = round(lucro / budget, 4))
+
+```
+Para a análise de viabilidade de investimento no segmento cinematográfico, foi necessário criar 3 novas colunas: Lucro, Margem¹ e ROI² (Retorno sobre o investimento).
+
+
+ _¹Margem = Lucro / Receita_
+ _²ROI = Lucro / Orçamento_
+
+
+## 3. Análise exploratório da base de dados
+### 3.1. Olhando para a distribuição de filmes pela coloração
+```{r message=FALSE, warning=FALSE, include=FALSE}
+filmes_excluir_1<-imdb %>% filter(color != "Color" | title_year < 1980) %>% nrow() 
+filmes_excluir_2<-imdb %>% filter(is.na(color)) %>% nrow() 
+filmes_excluir<-filmes_excluir_1 + filmes_excluir_2
+```
+
+Considerando a grande volumetria de filmes coloridos produzidos a partir dos anos de 1.980, iremos desconsiderar os filmes produzidos antes dessa data ou cuja a coloração é diferente de colorido. Com isso, serão desconsiderados `r filmes_excluir` filmes na continuidade da análise.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+imdb %>% 
+  filter(!is.na(color)) %>%
+  mutate(Cor = ifelse(color=="Color","Colorido", "Preto e Branco")) %>% 
+  group_by(title_year, Cor) %>% 
+  summarise(num_filmes = n()) %>% 
+  ggplot() +
+  geom_line(aes(x = title_year, y = num_filmes, color = Cor), size = 2) + 
+  scale_color_manual(values = c("#000998", "#A60000")) +
+  labs(title = "Quantidade de filmes por cor e ano") +
+  xlab("Ano") + ylab("Quantidade de Filmes") +
+  theme_minimal() +
+  theme(text = element_text(size = 8),
+        title = element_text(size = 12))
+
+  
+
+```
+
+Considerando nossa proposta de identificar qual a melhor opção de investimento, seja co
+
+### 3.2. Olhando para a Nota IMDb
+Os filmes concentram-se entre as notas 5.5 e 7.5 como ilustrados nos gráficos abaixo.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+imdb<-imdb %>% filter(color == "Color" & title_year >=1980)
+grafico_1<-imdb %>% 
+  group_by(title_year) %>% 
+  summarise(nota_media = mean(imdb_score, na.rm = TRUE),
+            nota_mediana = median(imdb_score, na.rm = TRUE)) %>% 
+  ggplot(aes(x = title_year)) +
+  geom_line(aes(y = nota_media, color = "Média"), size = 2) +
+  geom_line(aes(y = nota_mediana, color = "Mediana"), size = 2) +
+  scale_x_continuous(breaks = seq(1980, 2016, 5)) +
+  scale_y_continuous(breaks = seq(0, 10, 2)) +
+  scale_color_manual(values = c("#000998", "#A60000")) +
+  coord_cartesian(ylim = c(0, 10)) +
+  ggtitle("Média da Nota IMDb ao longo dos anos") + 
+  labs(x = "Ano", 
+       y = "Nota IMDb",
+       color = "Medidas Centrais") +
+  theme_minimal() +
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10),
+        legend.position = "bottom")
+
+grafico_2<-imdb %>% select(title_year, imdb_score) %>% 
+  ggplot()+geom_histogram(aes(x=imdb_score), binwidth = 0.5) +
+  ggtitle("Histograma das Notas IMDb") + 
+  scale_x_continuous(breaks = seq(0, 10, 1)) +
+  xlab("Nota IMDb") + ylab("Qtde de Filmes") +
+  theme_minimal() + 
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10))
+
+grafico_1 + grafico_2
+```
+
+
+
+### 3.3. Olhando para o número de curtidas no Facebook
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+grafico_3<-imdb %>% 
+  group_by(title_year) %>% 
+  mutate(curtidas = movie_facebook_likes/1000) %>% 
+  summarise(curtidas_media = mean(curtidas, na.rm = TRUE),
+            curtidas_mediana = median(curtidas, na.rm = TRUE),
+            curtidas_max = max(curtidas, na.rm = TRUE),
+            curtidas_min = min(curtidas, na.rm = TRUE)) %>% 
+  ggplot(aes(x = title_year)) +
+  geom_line(aes(y = curtidas_media, color = "Média"), size = 2) +
+  geom_line(aes(y = curtidas_mediana, color = "Mediana"), size = 2) +
+  scale_x_continuous(breaks = seq(1980, 2016, 5)) +
+  scale_y_continuous(breaks = seq(0, 50, 2)) +
+  ggtitle("Curtidas no Facebook \n ao longo dos anos") + 
+  scale_color_manual(values = c("#000998", "#A60000")) +
+  labs(x = "Ano", 
+       y = "Curtidas no Facebook (em milhares)",
+       color = "Medidas Centrais") +
+  theme_minimal() +
+  theme(text = element_text(size = 8, hjust = 0.5), 
+        plot.title = element_text(size = 10),
+        legend.position = "bottom")
+
+
+grafico_4<-imdb %>% select(movie_facebook_likes) %>% 
+  mutate(likes = movie_facebook_likes/1000) %>%
+  filter(likes < 80) %>% 
+  ggplot()+aes(x=likes)+geom_histogram(binwidth = 10) +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  ggtitle("Histograma das curtidas no Facebook") +
+  xlab("Qtde de curtidas no Facebook (em milhares)") + ylab("Qtde de Filmes") +
+  theme_minimal() + 
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10))
+  
+
+grafico_3 + grafico_4 
+
+minimo<-min(imdb$movie_facebook_likes)  
+maximo<-max(imdb$movie_facebook_likes)
+media<-round(mean(imdb$movie_facebook_likes),0)
+mediana<-median(imdb$movie_facebook_likes)
+```
+
+
+O que é interessante de observar é que esses mesmos filmes que tiveram um aumento representativo no número de curtidas no Facebook não tiveram melhor desempenho na nota IMDb.
+Isso pode ser um indicativo que o aumento no número de curtidas no facebook esteja mais relacionada a um aumento de popularização do aplicativo atrelada a divulgação do filme na rede social.
+
+### 3.4. Olhando para os gêneros dos filmes
+Pode-se observar que a nota IMDb não se mostrou um grande diferencial entre as diferentes gêneros de filmes.\nQuando analisado o desempenho desses filmes, olhando para o *Lucro*, para a *Margem* e *ROI*, existe uma variação maior entre os gêneros.
+Isto posto, a nota IMDb não se mostra um fator diferenciador relevante.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+generos<-unique(imdb$genres) %>% 
+  str_split(pattern = "[|]") %>% 
+  unlist() %>% 
+  unique()
+
+dados_generos<-NULL
+for (i in 1:length(generos)){
+medias<-imdb %>% 
+  filter(str_detect(string = genres, pattern = generos[i])) %>%
+  summarise(qtde = n(),
+            nota_imdb_media = mean(imdb_score, na.rm = TRUE),
+            nota_imdb_mediana = median(imdb_score, na.rm = TRUE),
+            receita_media = mean(gross, na.rm = TRUE),
+            receita_mediana = median(gross, na.rm = TRUE),
+            orcamento_medio = mean(budget, na.rm = TRUE),
+            orcamento_mediano = median(budget, na.rm = TRUE),
+            lucro_medio = mean(lucro, na.rm = TRUE),
+            lucro_mediano = median(lucro, na.rm = TRUE),
+            margem_media = mean(margem, na.rm = TRUE),
+            margem_mediana = median(margem, na.rm = TRUE),
+            roi_medio = mean(roi, na.rm = TRUE),
+            roi_mediano = median(roi, na.rm = TRUE)) %>% 
+  mutate(genero = generos[i]) 
+dados_generos<-bind_rows(dados_generos, medias)
+}
+
+dados_generos_ano<-NULL
+for (i in 1:length(generos)){
+medias<-imdb %>% 
+  filter(str_detect(string = genres, pattern = generos[i])) %>%
+  group_by(title_year) %>% 
+  summarise(qtde = n(),
+            nota_imdb_media = mean(imdb_score, na.rm = TRUE),
+            nota_imdb_mediana = median(imdb_score, na.rm = TRUE),
+            receita_media = mean(gross, na.rm = TRUE),
+            receita_mediana = median(gross, na.rm = TRUE),
+            orcamento_medio = mean(budget, na.rm = TRUE),
+            orcamento_mediano = median(budget, na.rm = TRUE),
+            lucro_medio = mean(lucro, na.rm = TRUE),
+            lucro_mediano = median(lucro, na.rm = TRUE),
+            margem_media = mean(margem, na.rm = TRUE),
+            margem_mediana = median(margem, na.rm = TRUE),
+            roi_medio = mean(roi, na.rm = TRUE),
+            roi_mediano = median(roi, na.rm = TRUE)) %>% 
+  mutate(genero = generos[i])
+dados_generos_ano<-bind_rows(dados_generos_ano, medias)
+}
+
+
+grafico_5<-dados_generos %>% 
+  mutate(genero = forcats::fct_reorder(genero, nota_imdb_media)) %>% 
+  slice_max(order_by = nota_imdb_media, n = 10) %>% 
+  ggplot() +
+  geom_col(aes(x = nota_imdb_media, y =genero, fill = nota_imdb_media), show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,10,1)) +
+  geom_label(aes(x = nota_imdb_media/2, y = genero, label = round(nota_imdb_media,1))) +
+  labs(
+    x = "Notas IMDb",
+    y = "Generos",
+    title = "Top 10 gêneros \npela nota IMDb"
+  ) + 
+  theme_minimal() + 
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10))
+
+grafico_5a<-dados_generos %>% 
+  mutate(genero = forcats::fct_reorder(genero, nota_imdb_mediana)) %>% 
+  slice_max(order_by = nota_imdb_mediana, n = 10) %>% 
+  ggplot() +
+  geom_col(aes(x = nota_imdb_mediana, y =genero, fill = nota_imdb_mediana), show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,10,1)) +
+  geom_label(aes(x = nota_imdb_mediana/2, y = genero, label = round(nota_imdb_mediana,1))) +
+  labs(
+    x = "Notas IMDb",
+    y = "Generos",
+    title = "Top 10 gêneros \npela nota IMDb mediana"
+  ) + 
+  theme_minimal() + 
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10))
+
+
+
+grafico_6<-dados_generos %>% 
+  mutate(genero = forcats::fct_reorder(genero, lucro_medio),) %>% 
+  slice_max(order_by = lucro_medio, n = 10) %>% 
+  mutate(lucro_medio = lucro_medio/1000000) %>% 
+  ggplot() +
+  geom_col(aes(x = lucro_medio, y =genero, fill = lucro_medio), show.legend = FALSE) +
+  geom_label(aes(x = lucro_medio/2, y = genero, label = round(lucro_medio,0))) +
+  scale_x_continuous(breaks = seq(0,25,5)) +
+  labs(
+    x = "Lucro Médio (R$ milhões)",
+    y = "Generos",
+    title = "Top 10 gêneros de filmes \npelo Lucro Médio"
+  ) + 
+  theme_minimal() + 
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10))
+  
+grafico_6a<-dados_generos %>% 
+  mutate(genero = forcats::fct_reorder(genero, lucro_mediano),) %>% 
+  slice_max(order_by = lucro_mediano, n = 10) %>% 
+  mutate(lucro_mediano = lucro_mediano/1000000) %>% 
+  ggplot() +
+  geom_col(aes(x = lucro_mediano, y =genero, fill = lucro_mediano), show.legend = FALSE) +
+  geom_label(aes(x = lucro_mediano/2, y = genero, label = round(lucro_mediano,0))) +
+  scale_x_continuous(breaks = seq(0,25,5)) +
+  labs(
+    x = "Lucro Médio (R$ milhões)",
+    y = "Generos",
+    title = "Top 10 gêneros de filmes \npelo Lucro Médiano"
+  ) + 
+  theme_minimal() + 
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10))
+  
+
+grafico_5a + grafico_6a
+
+
+grafico_7<-dados_generos %>% 
+  mutate(genero = forcats::fct_reorder(genero, margem_mediana)) %>% 
+  slice_max(order_by = margem_mediana, n = 10) %>% 
+  mutate(margem_mediana = margem_mediana*100) %>% 
+  ggplot() +
+  geom_col(aes(x = margem_mediana, y =genero, fill = margem_mediana), show.legend = FALSE) +
+  geom_label(aes(x = margem_mediana/2, y = genero, label = round(margem_mediana,1))) +
+  labs(
+    x = "Margem (%)",
+    y = "Generos",
+    title = "Top 10 gêneros \npela margem mediana em %"
+  ) + 
+  theme_minimal() + 
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10))
+
+grafico_8<-dados_generos %>% 
+  mutate(genero = forcats::fct_reorder(genero, roi_mediano)) %>% 
+  slice_max(order_by = roi_mediano, n = 10) %>%
+  mutate(roi_mediano = roi_mediano*100) %>% 
+  ggplot() +
+  geom_col(aes(x = roi_mediano, y =genero, fill = roi_mediano), show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,460,50)) +
+  geom_label(aes(x = roi_mediano/2, y = genero, label = round(roi_mediano,1))) +
+  labs(
+    x = "ROI (%)",
+    y = "Generos",
+    title = "Top 10 gêneros \npelo ROI mediano em %"
+  ) + 
+  theme_minimal() + 
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10))
+
+grafico_7 + grafico_8
+
+```
+
+
+### 3.4. Olhando para o Lucro, Margem e ROI
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+qtde_short<-dados_generos %>% filter(genero =="Short") %>% select(qtde)
+```
+
+
+Como vistos nos gráficos acima, o gênero *family* foi o que apresentou o maior lucro mediano e esta na terceira posição se olhado para a *Margem* e para o *ROI*. Este gênero tem um grande potencial de sucesso financeiro.
+
+Mas a tomada de decisão for orientada por filmes com maior margem ou ROI, em disparado os curta-metragens apresentam maior potencial.
+Para o gênero *Short*, o lucro representa, em média, 55% das receitas enquanto que o gênero *family* chega a 22%.
+Um outro dado interessantes é que o gênero *Short* indicou que tem um potencial estrondoso para gerar lucro em relação ao dinheiro aplicado. O que indica, que este gênero seria o mais indicado, por gerar mais retorno para o valor investido. 
+
+Muito bom pra ser verdade!!!
+
+O gênero *Short* só tem `r qtde_short` filmes na base analisada, amostra muito pequena para batermos o "martelo" ao dizer que investir 1 dolar nesse tipo de filmes o retorno esperado será de 4,53 dolares. Você compraria esse risco? Investiria confiando em números produzidos com base em `r qtde_short` observações?
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+dados_generos %>% 
+  mutate(genero = forcats::fct_reorder(genero, qtde),
+         lucro_mediano = lucro_mediano/1000000) %>% 
+  ggplot() +
+  geom_col(aes(x = qtde, y = genero, fill = lucro_mediano)) +
+  geom_label(aes(x = (qtde + 100), y = genero, label = qtde)) +
+  labs(
+    x = "Qtde de Filmes",
+    y = "Generos",
+    title = "Quantidade de filmes por gênero",
+    fill = "Lucro Mediano (em milhões)"
+  ) + 
+  theme_minimal() +
+  theme(text = element_text(size = 8, hjust = 0.5),
+        plot.title = element_text(size = 10),
+        legend.position = "bottom")
+
+
+```
+
+
+## 4. Concluindo
+
+Diante do exposto, olhar para a nota do IMDb não é conclusivo.
+Mas também é preciso avaliar com calma para o lucro, margem e ROI. Uma vez que, o gênero de filme que apresentou melhores indicadores tinha uma amostra insuficiente para gerar algum nivel de segurança sobre os índices apurados.
+
+
+Diante dos indicadores utilizados e do que observamos, ainda assim, apostaria no ROI como melhor indicador de potencialização de retorno de um dado investimento, uma vez que a proposta desse indicador é capturar a relação entre o lucro gerado no projeto e seu custo, transmitindo uma ideia de rentabilidade e deste modo, sendo possível comparar com outros ativos do mercado financeiro, e então decidir se vale aplicar nesse tipo de ativo ou em algum outro.
+Também cabe ressaltar que aqui não fizemos nenhuma correção monetária ou ajustes em virtude do tempo em que cada filmes foi produzido, tão pouco calculamos o payback, TIR ou qualquer outro indicador financeiro que nortea que contribuem para a tomada de decisão.
+
+## 5. Sobre o autor
+Ana Rafaela Torres, bacharel em ciências atuariais pela Universidade Católica de São Paulo. 
+
+E-mail: anarafaelatorres.art@hotmail.com 
+
+Linkedin: linkedin.com/in/ana-rafaela-torres
